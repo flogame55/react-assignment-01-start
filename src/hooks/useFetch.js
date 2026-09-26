@@ -1,6 +1,54 @@
-// ว่างไว้ตั้งใจ — R1: เอาของวันที่ 3–4 มาต่อได้ แต่ต้องเติม 3 อย่างนี้ให้ครบ
-//   1. เช็ก res.ok  (PokéAPI คืน 404 จริงเมื่อไม่พบ ต่างจาก TheMealDB วันที่ 4)
-//   2. cleanup กัน response เก่ามาทับ response ใหม่  (Twist 5 — กด "ถัดไป" รัว ๆ)
-//   3. รองรับ url = null แปลว่า "ไม่ต้องยิง"  ← ของวันที่ 3–4 ยังไม่มี
-//      หน้ารายการเรียก hook นี้ไว้เสมอ แต่ยิง endpoint ธาตุเฉพาะตอนเลือกธาตุจริง ๆ
-//      ถ้าไม่ทำ จะยิงไปที่ /null แล้วขึ้น error ตั้งแต่เปิดหน้า
+// R1: Custom Hook useFetch(url)
+// - เช็ค res.ok (PokéAPI คืน 404 เมื่อไม่พบข้อมูล)
+// - cleanup ด้วย AbortController กัน race condition (Twist 5)
+// - รองรับ url = null (ไม่ยิง และรีเซ็ตสถานะ)
+import { useState, useEffect } from 'react'
+
+export function useFetch(url) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(Boolean(url))
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!url) {
+      setData(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    const controller = new AbortController()
+    let active = true
+
+    setLoading(true)
+    setError(null)
+
+    fetch(url, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(res.status === 404 ? 'ไม่พบข้อมูล' : `เกิดข้อผิดพลาด (${res.status})`)
+        }
+        return res.json()
+      })
+      .then((json) => {
+        if (!active) return
+        setData(json)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (!active || err.name === 'AbortError') return
+        setError(err.message || 'เกิดข้อผิดพลาดในการโหลดข้อมูล')
+        setData(null)
+        setLoading(false)
+      })
+
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [url])
+
+  return { data, loading, error }
+}
+
+export default useFetch
